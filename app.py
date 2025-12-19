@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, time, timedelta, date
+from streamlit_autorefresh import st_autorefresh
 import pytz
 
 # --------------------------------------------------------------------------
@@ -48,6 +49,7 @@ MY_PORTFOLIO = {
 # --------------------------------------------------------------------------
 st.set_page_config(layout="wide", page_title="목금월 운동회장")
 st.title("운동회 현황")
+count = st_autorefresh(interval=180 * 1000, key="datarefresh")
 
 # --------------------------------------------------------------------------
 # [스타일 및 CSS]
