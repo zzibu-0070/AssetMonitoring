@@ -4,8 +4,23 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, time, timedelta, date
-from streamlit_autorefresh import st_autorefresh
 import pytz
+
+# [추가됨] 자동 새로고침 라이브러리
+# 설치 필요: pip install streamlit-autorefresh
+from streamlit_autorefresh import st_autorefresh
+
+# --------------------------------------------------------------------------
+# [페이지 설정]
+# --------------------------------------------------------------------------
+st.set_page_config(layout="wide", page_title="목금월 운동회장")
+
+# [핵심] 자동 새로고침 설정 (interval: 밀리초 단위)
+# 180 * 1000 = 180,000ms = 3분
+# key는 이 타이머의 고유 이름입니다.
+count = st_autorefresh(interval=180 * 1000, key="datarefresh")
+
+st.title("운동회장")
 
 # --------------------------------------------------------------------------
 # [사용자 설정] 3단 구조 (카테고리 > 섹터 > 종목)
@@ -45,13 +60,6 @@ MY_PORTFOLIO = {
 }
 
 # --------------------------------------------------------------------------
-# [페이지 설정]
-# --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="목금월 운동회장")
-st.title("운동회 현황")
-count = st_autorefresh(interval=180 * 1000, key="datarefresh")
-
-# --------------------------------------------------------------------------
 # [스타일 및 CSS]
 # --------------------------------------------------------------------------
 st.markdown("""
@@ -60,7 +68,6 @@ st.markdown("""
     div[data-testid="stMetricValue"] { font-size: 1.0rem; }
     div[data-testid="column"] { align-items: end; } 
     
-    /* 고스트 버튼 스타일 */
     div[data-testid="stButton"] > button {
         background-color: transparent !important;
         border: none !important;
@@ -100,19 +107,19 @@ with col_space:
 
 with col_time:
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    st.markdown(f"<div style='text-align: right; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;'>🕒 기준: {now_str}</div>", unsafe_allow_html=True)
+    # 자동 갱신 카운트를 작게 표시해서 작동 중임을 알려줌 (선택사항)
+    st.markdown(f"<div style='text-align: right; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;'>🕒 기준: {now_str} <span style='font-size:0.7em; color:gray;'>(Auto {count})</span></div>", unsafe_allow_html=True)
 
 is_today_selected = (selected_date == date.today())
 
 # --------------------------------------------------------------------------
-# [헬퍼 함수] 차트 그리기 (가변 X축 적용)
+# [헬퍼 함수] 차트 그리기 (Y축 1.5배 & 가변 X축)
 # --------------------------------------------------------------------------
 def create_chart(ticker, df):
     closes = df['Close']
     curr_price = closes.iloc[-1]
     start_price = closes.iloc[0]
     
-    # Y축 범위 계산 (1.5배 확장)
     min_val = closes.min()
     max_val = closes.max()
     diff = max_val - min_val
@@ -134,36 +141,25 @@ def create_chart(ticker, df):
         row_heights=[0.75, 0.25], specs=[[{"secondary_y": False}], [{"secondary_y": False}]]
     )
 
-    # 상단: 주가
     fig.add_trace(go.Scatter(
         x=df.index, y=closes, mode='lines', line=dict(color=color, width=2),
         fill='tozeroy', fillcolor=f"rgba{tuple(int(color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)) + (0.05,)}"
     ), row=1, col=1)
 
-    # 하단: 거래량
     fig.add_trace(go.Bar(
         x=df.index, y=df['Volume'], marker_color='lightgray', opacity=0.3
     ), row=2, col=1)
 
-    # -------------------------------------------------------
-    # [핵심 수정] X축 가변 고정 로직 (Smart Zoom)
-    # -------------------------------------------------------
     if not df.empty:
         base_dt = df.index[0]
         base_date = base_dt.date()
         base_tz = base_dt.tzinfo 
-        
-        # 1. 주요 시간대 정의
         market_open = datetime.combine(base_date, time(9, 30)).replace(tzinfo=base_tz)
-        market_mid  = datetime.combine(base_date, time(13, 0)).replace(tzinfo=base_tz) # 오후 1시 기준
+        market_mid  = datetime.combine(base_date, time(13, 0)).replace(tzinfo=base_tz) 
         market_close = datetime.combine(base_date, time(16, 0)).replace(tzinfo=base_tz)
         
-        # 2. 현재 데이터의 마지막 시간 확인
         last_data_time = df.index[-1]
         
-        # 3. 조건부 범위 설정
-        # 데이터가 13:00 이전이면 -> 09:30 ~ 13:00까지만 보여줌 (확대 효과)
-        # 데이터가 13:00 넘어가면 -> 09:30 ~ 16:00 전체 보여줌
         if last_data_time < market_mid:
             x_range = [market_open, market_mid]
         else:
@@ -176,18 +172,16 @@ def create_chart(ticker, df):
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
     )
     
-    # Y축 설정
     fig.update_yaxes(
         range=[y_min, y_max], visible=True, showgrid=True, gridcolor='rgba(200,200,200,0.2)',
         tickfont=dict(size=10, color='gray'), row=1, col=1
     )
     fig.update_yaxes(visible=False, row=2, col=1)
 
-    # X축 설정
     fig.update_xaxes(
         visible=True, row=2, col=1, tickformat="%H:%M",
         dtick=7200000, showgrid=False, tickfont=dict(size=9, color='gray'),
-        range=x_range  # 가변 범위 적용
+        range=x_range
     )
     fig.update_xaxes(visible=False, row=1, col=1, range=x_range)
 
@@ -196,6 +190,17 @@ def create_chart(ticker, df):
 # --------------------------------------------------------------------------
 # [메인 로직]
 # --------------------------------------------------------------------------
+# 자동 갱신 시 캐시된 데이터가 아닌 새 데이터를 받아와야 하므로
+# 이전에 받아온 캐시를 비우는 로직이 필요할 수 있습니다.
+# 하지만 st_autorefresh는 단순히 페이지를 '새로고침'하는 역할이므로,
+# yfinance 함수 내부의 캐싱(@st.cache_data)을 ttl(유효기간)로 관리하는 것이 좋습니다.
+
+# [중요] 기존 코드에 @st.cache_data가 없었거나 ttl 설정을 안 했다면
+# 매번 다운로드하므로 속도는 느리지만 최신 데이터는 보장됩니다.
+# API 보호를 위해 캐싱을 씌우고 ttl을 180초로 맞추는 것을 추천합니다.
+
+# 여기서는 직관성을 위해 캐싱 없이 매번 호출하되 3분 간격을 둡니다.
+
 for category, sectors in MY_PORTFOLIO.items():
     st.header(f"{category}")
     
