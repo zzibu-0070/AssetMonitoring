@@ -52,7 +52,7 @@ MY_PORTFOLIO = {
         "전통에너지": ["XOM", "CVX", "SHEL", "SLB"],
         "미래에너지": ["TSLA", "FSLR", "NEE", "ENPH"],
         "데이터인프라": ["MSFT", "AMZN", "AVGO", "ANET", "GOOG", "META", "NVDA"],
-        "필수소비재": ["PG", "COST", "WNT", "KO", "PEP", "AMZN"],
+        "필수소비재": ["PG", "COST", "WMT", "KO", "PEP", "AMZN"],
         "결제시스템": ["V", "MA", "AXP", "XYZ", "PYPL"],
         "명품소비재": ["LVMUY", "HESAY", "RACE", "CFRUY", "EL"],
         "물과 식량": ["AWK", "XYL", "ECL", "PHO", "ADM", "DE", "CTVA", "CF"]
