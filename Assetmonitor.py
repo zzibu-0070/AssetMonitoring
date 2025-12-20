@@ -2,18 +2,18 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px  # [추가] 트리맵 그리기용
+import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, time, timedelta, date
 import pytz
 
-# [추가됨] 자동 새로고침 라이브러리
+# 자동 새로고침 라이브러리
 from streamlit_autorefresh import st_autorefresh
 
 # --------------------------------------------------------------------------
 # [페이지 설정]
 # --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="목금월 운동회장")
+st.set_page_config(layout="wide", page_title="목금월 운동회")
 
 # 자동 새로고침 (3분)
 count = st_autorefresh(interval=180 * 1000, key="datarefresh")
@@ -185,11 +185,11 @@ def create_chart(ticker, df):
     return fig
 
 # --------------------------------------------------------------------------
-# [헬퍼 함수 2] 트리맵 데이터 준비 (신규 추가)
+# [헬퍼 함수 2] 트리맵 데이터 준비 (날짜 반영 기능 추가)
 # --------------------------------------------------------------------------
-@st.cache_data(ttl=180) # 3분 캐시
-def get_treemap_data(portfolio):
-    # 1. 포트폴리오 Flattening
+# [수정] 입력값에 target_date와 is_today 추가
+@st.cache_data(ttl=180) 
+def get_treemap_data(portfolio, target_date, is_today):
     tickers_list = []
     rows = []
     
@@ -201,7 +201,7 @@ def get_treemap_data(portfolio):
                     "Category": category,
                     "Sector": sector,
                     "Ticker": ticker,
-                    "Size": 1 # 동일 크기
+                    "Size": 1 
                 })
     
     unique_tickers = list(set(tickers_list))
@@ -209,31 +209,55 @@ def get_treemap_data(portfolio):
         return pd.DataFrame()
         
     try:
-        # 최근 5일치 일괄 다운로드
-        data = yf.download(unique_tickers, period="5d", group_by='ticker', threads=True)
-        
+        # [수정] 날짜에 따른 데이터 다운로드 분기
+        if is_today:
+            # 오늘: 최근 데이터 가져옴 (5일치 안전하게)
+            data = yf.download(unique_tickers, period="5d", group_by='ticker', threads=True)
+        else:
+            # 과거: 해당 날짜의 시가/종가만 필요하므로 하루치만 요청
+            # yfinance는 end 날짜를 포함하지 않으므로 +1일 해야 함
+            start_dt = target_date
+            end_dt = target_date + timedelta(days=1)
+            data = yf.download(unique_tickers, start=start_dt, end=end_dt, group_by='ticker', threads=True)
+
         final_rows = []
         for row in rows:
             ticker = row['Ticker']
             try:
-                # yf.download 결과 구조 처리
                 if len(unique_tickers) > 1:
                     df = data[ticker]
                 else:
                     df = data
                 
+                # 데이터가 비어있으면 패스 (휴장일 등)
                 if df.empty or df['Close'].isna().all():
                     continue
-                    
-                recent_close = df['Close'].dropna()
-                if len(recent_close) < 2:
-                    continue
+                
+                # 등락률 계산 로직 분기
+                pct_change = 0
+                
+                if is_today:
+                    # [오늘] 현재가 vs 전일 종가
+                    recent_close = df['Close'].dropna()
+                    if len(recent_close) >= 2:
+                        curr = recent_close.iloc[-1]
+                        prev = recent_close.iloc[-2]
+                        pct_change = ((curr - prev) / prev) * 100
+                    else:
+                        continue # 데이터 부족
+                else:
+                    # [과거] 그날의 종가 vs 그날의 시가 (Daily Candle Body)
+                    # 만약 전일 대비 등락률을 원하면 로직이 복잡해지므로, 여기선 '그날 장중 변동'으로 표시
+                    # (또는 yf.download에서 2일치 받아서 전일 종가 비교도 가능하지만 여기선 시가 대비로 통일)
+                    daily_data = df.dropna()
+                    if not daily_data.empty:
+                        open_price = daily_data['Open'].iloc[0]
+                        close_price = daily_data['Close'].iloc[0]
+                        if open_price != 0:
+                            pct_change = ((close_price - open_price) / open_price) * 100
+                    else:
+                        continue
 
-                curr = recent_close.iloc[-1]
-                prev = recent_close.iloc[-2]
-                
-                pct_change = ((curr - prev) / prev) * 100
-                
                 row['Change'] = pct_change
                 row['Label'] = f"{ticker}<br>{pct_change:.2f}%"
                 final_rows.append(row)
@@ -251,8 +275,7 @@ def get_treemap_data(portfolio):
 # [메인 로직] 탭(Tab) 구성
 # --------------------------------------------------------------------------
 
-# 탭 나누기
-tab1, tab2 = st.tabs(["Chart", "Treemap"])
+tab1, tab2 = st.tabs(["Charts", "Treemap"])
 
 # --- TAB 1: 기존 차트 뷰 ---
 with tab1:
@@ -318,22 +341,22 @@ with tab1:
 
 # --- TAB 2: 트리맵 뷰 ---
 with tab2:
-    st.subheader("운동회 전광판(Treemap)")
+    st.subheader("운동회 전광판")
     
     if st.button("지도 데이터 새로고침", key="tree_refresh"):
         st.cache_data.clear()
         
     with st.spinner("경기 데이터를 모으는 중..."):
-        df_tree = get_treemap_data(MY_PORTFOLIO)
+        # [수정] 함수 호출 시 날짜 정보 전달
+        df_tree = get_treemap_data(MY_PORTFOLIO, selected_date, is_today_selected)
     
     if not df_tree.empty:
-        # 트리맵 그리기
         fig = px.treemap(
             df_tree, 
             path=[px.Constant("운동회장"), 'Category', 'Sector', 'Ticker'], 
             values='Size', 
             color='Change',
-            color_continuous_scale=['#42a5f5', '#eeeeee', '#ef5350'], # 파랑(하락) - 회색 - 빨강(상승)
+            color_continuous_scale=['#42a5f5', '#eeeeee', '#ef5350'],
             color_continuous_midpoint=0, 
             range_color=[-3, 3], 
             custom_data=['Change']
@@ -350,4 +373,4 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True)
         
     else:
-        st.warning("트리맵 데이터를 불러올 수 없습니다.")
+        st.info("해당 날짜의 데이터가 없거나 휴장일입니다.")
