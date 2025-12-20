@@ -13,15 +13,15 @@ from streamlit_autorefresh import st_autorefresh
 # --------------------------------------------------------------------------
 # [페이지 설정]
 # --------------------------------------------------------------------------
-st.set_page_config(layout="wide", page_title="목금월 운동회")
+st.set_page_config(layout="wide", page_title="목금월 운동회장")
 
 # 자동 새로고침 (3분)
 count = st_autorefresh(interval=180 * 1000, key="datarefresh")
 
-st.title("운동회장")
+st.title("🏃 목금월 운동회장")
 
 # --------------------------------------------------------------------------
-# [사용자 설정] 3단 구조 (카테고리 > 섹터 > 종목)
+# [사용자 설정] 3단 구조
 # --------------------------------------------------------------------------
 MY_PORTFOLIO = {
     "Index": {
@@ -168,26 +168,22 @@ def create_chart(ticker, df):
         margin=dict(l=40, r=10, t=10, b=0), height=240, showlegend=False,
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
     )
-    
     fig.update_yaxes(
         range=[y_min, y_max], visible=True, showgrid=True, gridcolor='rgba(200,200,200,0.2)',
         tickfont=dict(size=10, color='gray'), row=1, col=1
     )
     fig.update_yaxes(visible=False, row=2, col=1)
-
     fig.update_xaxes(
         visible=True, row=2, col=1, tickformat="%H:%M",
         dtick=7200000, showgrid=False, tickfont=dict(size=9, color='gray'),
         range=x_range
     )
     fig.update_xaxes(visible=False, row=1, col=1, range=x_range)
-
     return fig
 
 # --------------------------------------------------------------------------
-# [헬퍼 함수 2] 트리맵 데이터 준비 (날짜 반영 기능 추가)
+# [헬퍼 함수 2] 트리맵 데이터 준비
 # --------------------------------------------------------------------------
-# [수정] 입력값에 target_date와 is_today 추가
 @st.cache_data(ttl=180) 
 def get_treemap_data(portfolio, target_date, is_today):
     tickers_list = []
@@ -209,13 +205,9 @@ def get_treemap_data(portfolio, target_date, is_today):
         return pd.DataFrame()
         
     try:
-        # [수정] 날짜에 따른 데이터 다운로드 분기
         if is_today:
-            # 오늘: 최근 데이터 가져옴 (5일치 안전하게)
             data = yf.download(unique_tickers, period="5d", group_by='ticker', threads=True)
         else:
-            # 과거: 해당 날짜의 시가/종가만 필요하므로 하루치만 요청
-            # yfinance는 end 날짜를 포함하지 않으므로 +1일 해야 함
             start_dt = target_date
             end_dt = target_date + timedelta(days=1)
             data = yf.download(unique_tickers, start=start_dt, end=end_dt, group_by='ticker', threads=True)
@@ -229,26 +221,19 @@ def get_treemap_data(portfolio, target_date, is_today):
                 else:
                     df = data
                 
-                # 데이터가 비어있으면 패스 (휴장일 등)
                 if df.empty or df['Close'].isna().all():
                     continue
                 
-                # 등락률 계산 로직 분기
                 pct_change = 0
-                
                 if is_today:
-                    # [오늘] 현재가 vs 전일 종가
                     recent_close = df['Close'].dropna()
                     if len(recent_close) >= 2:
                         curr = recent_close.iloc[-1]
                         prev = recent_close.iloc[-2]
                         pct_change = ((curr - prev) / prev) * 100
                     else:
-                        continue # 데이터 부족
+                        continue 
                 else:
-                    # [과거] 그날의 종가 vs 그날의 시가 (Daily Candle Body)
-                    # 만약 전일 대비 등락률을 원하면 로직이 복잡해지므로, 여기선 '그날 장중 변동'으로 표시
-                    # (또는 yf.download에서 2일치 받아서 전일 종가 비교도 가능하지만 여기선 시가 대비로 통일)
                     daily_data = df.dropna()
                     if not daily_data.empty:
                         open_price = daily_data['Open'].iloc[0]
@@ -272,13 +257,50 @@ def get_treemap_data(portfolio, target_date, is_today):
         return pd.DataFrame()
 
 # --------------------------------------------------------------------------
-# [메인 로직] 탭(Tab) 구성
+# [메인 로직] 탭(Tab) 순서 변경: 트리맵이 먼저 오도록 수정
 # --------------------------------------------------------------------------
 
-tab1, tab2 = st.tabs(["Charts", "Treemap"])
+# [변경 포인트] 트리맵을 1번 탭으로, 차트를 2번 탭으로 배치
+tab1, tab2 = st.tabs(["🗺️ 운동회장 전체 조감도 (Treemap)", "📊 개별 경기 현황 (차트)"])
 
-# --- TAB 1: 기존 차트 뷰 ---
+# --- TAB 1: 트리맵 뷰 (빠른 로딩) ---
 with tab1:
+    st.subheader("🗺️ 운동회장 전체 현황판")
+    
+    # 캐시 비우기 버튼 (트리맵 전용)
+    if st.button("지도 데이터 새로고침", key="tree_refresh"):
+        st.cache_data.clear()
+        
+    with st.spinner("경기 데이터를 모으는 중..."):
+        df_tree = get_treemap_data(MY_PORTFOLIO, selected_date, is_today_selected)
+    
+    if not df_tree.empty:
+        fig = px.treemap(
+            df_tree, 
+            path=[px.Constant("운동회장"), 'Category', 'Sector', 'Ticker'], 
+            values='Size', 
+            color='Change',
+            color_continuous_scale=['#42a5f5', '#eeeeee', '#ef5350'],
+            color_continuous_midpoint=0, 
+            range_color=[-3, 3], 
+            custom_data=['Change']
+        )
+        
+        fig.update_traces(
+            textinfo="label+text",
+            texttemplate="%{label}<br>%{customdata[0]:.2f}%",
+            textfont=dict(size=14),
+            hovertemplate='<b>%{label}</b><br>등락률: %{customdata[0]:.2f}%'
+        )
+        
+        fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=700)
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("데이터가 없습니다.")
+
+# --- TAB 2: 기존 차트 뷰 (느린 로딩 - 사용자가 클릭할 때 로드됨) ---
+with tab2:
+    # 탭을 누르면 이 아래 코드가 실행됩니다.
     for category, sectors in MY_PORTFOLIO.items():
         st.header(f"{category}")
         
@@ -338,39 +360,3 @@ with tab1:
                         st.error(f"Error: {ticker}")
             st.write("") 
         st.divider()
-
-# --- TAB 2: 트리맵 뷰 ---
-with tab2:
-    st.subheader("운동회 전광판")
-    
-    if st.button("지도 데이터 새로고침", key="tree_refresh"):
-        st.cache_data.clear()
-        
-    with st.spinner("경기 데이터를 모으는 중..."):
-        # [수정] 함수 호출 시 날짜 정보 전달
-        df_tree = get_treemap_data(MY_PORTFOLIO, selected_date, is_today_selected)
-    
-    if not df_tree.empty:
-        fig = px.treemap(
-            df_tree, 
-            path=[px.Constant("운동회장"), 'Category', 'Sector', 'Ticker'], 
-            values='Size', 
-            color='Change',
-            color_continuous_scale=['#42a5f5', '#eeeeee', '#ef5350'],
-            color_continuous_midpoint=0, 
-            range_color=[-3, 3], 
-            custom_data=['Change']
-        )
-        
-        fig.update_traces(
-            textinfo="label+text",
-            texttemplate="%{label}<br>%{customdata[0]:.2f}%",
-            textfont=dict(size=14),
-            hovertemplate='<b>%{label}</b><br>등락률: %{customdata[0]:.2f}%'
-        )
-        
-        fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=700)
-        st.plotly_chart(fig, use_container_width=True)
-        
-    else:
-        st.info("해당 날짜의 데이터가 없거나 휴장일입니다.")
