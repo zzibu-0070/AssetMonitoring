@@ -257,17 +257,14 @@ def get_treemap_data(portfolio, target_date, is_today):
         return pd.DataFrame()
 
 # --------------------------------------------------------------------------
-# [메인 로직] 탭(Tab) 순서 변경: 트리맵이 먼저 오도록 수정
+# [메인 로직]
 # --------------------------------------------------------------------------
 
-# [변경 포인트] 트리맵을 1번 탭으로, 차트를 2번 탭으로 배치
 tab1, tab2 = st.tabs(["Treemap", "Charts"])
 
-# --- TAB 1: 트리맵 뷰 (빠른 로딩) ---
+# --- TAB 1: 트리맵 뷰 ---
 with tab1:
     st.subheader("운동회 전광판")
-    
-    # 캐시 비우기 버튼 (트리맵 전용)
     if st.button("지도 데이터 새로고침", key="tree_refresh"):
         st.cache_data.clear()
         
@@ -285,31 +282,30 @@ with tab1:
             range_color=[-3, 3], 
             custom_data=['Change']
         )
-        
         fig.update_traces(
             textinfo="label+text",
             texttemplate="%{label}<br>%{customdata[0]:.2f}%",
             textfont=dict(size=14),
             hovertemplate='<b>%{label}</b><br>등락률: %{customdata[0]:.2f}%'
         )
-        
         fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=700)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("데이터가 없습니다.")
 
-# --- TAB 2: 기존 차트 뷰 (느린 로딩 - 사용자가 클릭할 때 로드됨) ---
+# --- TAB 2: 차트 뷰 (5열 그리드 방식) ---
 with tab2:
-    # 탭을 누르면 이 아래 코드가 실행됩니다.
     for category, sectors in MY_PORTFOLIO.items():
         st.header(f"{category}")
         
         for sector, tickers in sectors.items():
             st.subheader(f"{sector}")
-            cols = st.columns(4)
+            
+            # [수정] 5열 그리드 로직으로 변경
+            cols = st.columns(5)
             
             for idx, ticker in enumerate(tickers):
-                with cols[idx % 4]:
+                with cols[idx % 5]:
                     try:
                         stock = yf.Ticker(ticker)
                         hist = pd.DataFrame()
