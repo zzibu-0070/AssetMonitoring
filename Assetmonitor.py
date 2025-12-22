@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 from datetime import datetime, time, timedelta, date
-import pytz
 
 # 자동 새로고침 라이브러리
 from streamlit_autorefresh import st_autorefresh
@@ -15,13 +14,13 @@ from streamlit_autorefresh import st_autorefresh
 # --------------------------------------------------------------------------
 st.set_page_config(layout="wide", page_title="목금월 운동회")
 
-# 자동 새로고침 (3분)
+# 자동 새로고침 (3분 = 180초)
 count = st_autorefresh(interval=180 * 1000, key="datarefresh")
 
-st.title("운동회장")
+st.title("🏃‍♂️ 운동회장")
 
 # --------------------------------------------------------------------------
-# [사용자 설정] 3단 구조
+# [사용자 설정] 포트폴리오 정의
 # --------------------------------------------------------------------------
 MY_PORTFOLIO = {
     "Index": {
@@ -99,6 +98,7 @@ with col_date:
 with col_btn:
     if st.button('🔄'):
         st.cache_data.clear()
+        st.rerun()
 
 with col_space:
     st.empty() 
@@ -182,7 +182,7 @@ def create_chart(ticker, df):
     return fig
 
 # --------------------------------------------------------------------------
-# [헬퍼 함수 2] 트리맵 데이터 준비
+# [헬퍼 함수 2] 트리맵 데이터 준비 (업그레이드된 로직)
 # --------------------------------------------------------------------------
 @st.cache_data(ttl=180) 
 def get_treemap_data(portfolio, target_date, is_today):
@@ -205,12 +205,15 @@ def get_treemap_data(portfolio, target_date, is_today):
         return pd.DataFrame()
         
     try:
+        # 오늘 날짜인 경우, 전일 종가를 알기 위해 5일치를 넉넉히 가져옴
+        period_arg = "5d" if is_today else None
+        start_arg = None if is_today else target_date
+        end_arg = None if is_today else target_date + timedelta(days=1)
+        
         if is_today:
-            data = yf.download(unique_tickers, period="5d", group_by='ticker', threads=True)
+            data = yf.download(unique_tickers, period=period_arg, group_by='ticker', threads=True)
         else:
-            start_dt = target_date
-            end_dt = target_date + timedelta(days=1)
-            data = yf.download(unique_tickers, start=start_dt, end=end_dt, group_by='ticker', threads=True)
+            data = yf.download(unique_tickers, start=start_arg, end=end_arg, group_by='ticker', threads=True)
 
         final_rows = []
         for row in rows:
@@ -221,27 +224,35 @@ def get_treemap_data(portfolio, target_date, is_today):
                 else:
                     df = data
                 
+                # 데이터가 아예 없거나, 종가 컬럼이 모두 비어있으면 건너뜀
                 if df.empty or df['Close'].isna().all():
                     continue
                 
-                pct_change = 0
+                pct_change = 0.0
+                
+                # [로직 개선 포인트]
                 if is_today:
-                    recent_close = df['Close'].dropna()
-                    if len(recent_close) >= 2:
-                        curr = recent_close.iloc[-1]
-                        prev = recent_close.iloc[-2]
+                    recent_closes = df['Close'].dropna()
+                    if len(recent_closes) >= 2:
+                        # 데이터가 충분하면: (현재가 - 전일종가) / 전일종가
+                        curr = recent_closes.iloc[-1]
+                        prev = recent_closes.iloc[-2]
                         pct_change = ((curr - prev) / prev) * 100
-                    else:
-                        continue 
+                    elif len(recent_closes) == 1:
+                        # 장 시작 직후라 데이터가 1개뿐이면: (현재가 - 시가) / 시가
+                        # 혹은 이전 데이터가 없어서 시가 대비로 계산
+                        curr = recent_closes.iloc[-1]
+                        open_p = df['Open'].dropna().iloc[-1]
+                        if open_p != 0:
+                            pct_change = ((curr - open_p) / open_p) * 100
                 else:
+                    # 과거 날짜 조회 (기존 로직 유지)
                     daily_data = df.dropna()
                     if not daily_data.empty:
                         open_price = daily_data['Open'].iloc[0]
                         close_price = daily_data['Close'].iloc[0]
                         if open_price != 0:
                             pct_change = ((close_price - open_price) / open_price) * 100
-                    else:
-                        continue
 
                 row['Change'] = pct_change
                 row['Label'] = f"{ticker}<br>{pct_change:.2f}%"
@@ -265,8 +276,10 @@ tab1, tab2 = st.tabs(["Treemap", "Charts"])
 # --- TAB 1: 트리맵 뷰 ---
 with tab1:
     st.subheader("운동회 전광판")
+    # 버튼 누르면 캐시 비우고 즉시 리런
     if st.button("지도 데이터 새로고침", key="tree_refresh"):
         st.cache_data.clear()
+        st.rerun() 
         
     with st.spinner("경기 데이터를 모으는 중..."):
         df_tree = get_treemap_data(MY_PORTFOLIO, selected_date, is_today_selected)
@@ -301,7 +314,7 @@ with tab2:
         for sector, tickers in sectors.items():
             st.subheader(f"{sector}")
             
-            # [수정] 5열 그리드 로직으로 변경
+            # 5열 그리드
             cols = st.columns(5)
             
             for idx, ticker in enumerate(tickers):
@@ -312,7 +325,7 @@ with tab2:
 
                         if is_today_selected:
                             hist = stock.history(period="1d", interval="5m")
-                            if hist.empty:
+                            if hist.empty: # 장 시작 전이거나 데이터 없을 때
                                 recent_hist = stock.history(period="5d", interval="5m")
                                 if not recent_hist.empty:
                                     last_trade_date = recent_hist.index[-1].date()
@@ -329,13 +342,20 @@ with tab2:
                             continue
 
                         curr = hist['Close'].iloc[-1]
-                        prev_close = stock.info.get('previousClose', hist['Open'].iloc[0])
+                        
+                        # 전일 종가 가져오기 (info 활용 시도 -> 실패시 시가 사용)
+                        prev_close = stock.info.get('previousClose', None)
+                        if prev_close is None:
+                            prev_close = hist['Open'].iloc[0]
                         
                         shown_date = hist.index[-1].date()
+                        
                         if shown_date != date.today():
+                             # 과거 데이터면 시가를 기준점으로
                              ref_price = hist['Open'].iloc[0]
                              label_suffix = f"({shown_date.strftime('%m/%d')})"
                         else:
+                             # 오늘 데이터면 전일 종가를 기준점으로
                              ref_price = prev_close
                              label_suffix = ""
 
