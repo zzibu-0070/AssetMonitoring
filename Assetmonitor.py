@@ -3,9 +3,8 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, time, timedelta, date
-import math  # [추가] 제곱근 계산용
 
-# 자동 새로고침 라이브러리
+# 자동 새로고침 라이브러리 (설치 필요: pip install streamlit-autorefresh)
 from streamlit_autorefresh import st_autorefresh
 
 # --------------------------------------------------------------------------
@@ -13,13 +12,13 @@ from streamlit_autorefresh import st_autorefresh
 # --------------------------------------------------------------------------
 st.set_page_config(layout="wide", page_title="목금월 운동회")
 
-# 자동 새로고침 (3분)
+# 자동 새로고침 (3분 = 180초)
 count = st_autorefresh(interval=180 * 1000, key="datarefresh")
 
 st.title("🧩 운동회장 Dashboard")
 
 # --------------------------------------------------------------------------
-# [사용자 설정] 포트폴리오 정의 (기존과 동일)
+# [사용자 설정] 포트폴리오 정의
 # --------------------------------------------------------------------------
 MY_PORTFOLIO = {
     "Index": {
@@ -154,6 +153,7 @@ def create_chart(ticker, df):
     fig.add_trace(go.Scatter(
         x=df.index, y=closes, mode='lines', line=dict(color=color, width=2),
         fill='tozeroy', 
+        # [수정 완료] rgba 괄호 추가
         fillcolor=f"rgba({int(color.lstrip('#')[0:2], 16)}, {int(color.lstrip('#')[2:4], 16)}, {int(color.lstrip('#')[4:6], 16)}, 0.1)"
     ))
 
@@ -169,7 +169,7 @@ def create_chart(ticker, df):
     return fig
 
 # --------------------------------------------------------------------------
-# [헬퍼 함수 2] 트리맵 데이터 생성 (USD 환산 + 시총 가중치 + Sqrt Sizing)
+# [헬퍼 함수 2] 트리맵 데이터 생성 (USD 환산 + 시총 가중치)
 # --------------------------------------------------------------------------
 @st.cache_data(ttl=3600)
 def get_weighted_treemap_data(portfolio, target_date, is_today):
@@ -181,7 +181,7 @@ def get_weighted_treemap_data(portfolio, target_date, is_today):
     
     unique_tickers = list(set(all_tickers))
     
-    # 2. 가격 데이터 다운로드
+    # 2. 가격 데이터 다운로드 (등락률 계산용)
     try:
         if is_today:
             price_data = yf.download(unique_tickers, period="5d", group_by='ticker', threads=True, progress=False)
@@ -191,68 +191,67 @@ def get_weighted_treemap_data(portfolio, target_date, is_today):
     except:
         return pd.DataFrame()
 
-    # 3. 환율 정보
-    usd_krw = 1350.0 
-    usd_jpy = 150.0  
+    # -------------------------------------------------------------
+    # 3. 환율 정보 가져오기 (USD 기준 통일용)
+    # -------------------------------------------------------------
+    usd_krw = 1350.0 # 기본값
+    usd_jpy = 150.0  # 기본값
     try:
+        # 최근 5일치 가져와서 가장 최근 종가 사용
         ex_data = yf.download(["KRW=X", "JPY=X"], period="5d", progress=False)['Close']
         if not ex_data.empty:
             usd_krw = ex_data['KRW=X'].iloc[-1]
             usd_jpy = ex_data['JPY=X'].iloc[-1]
     except:
-        pass
+        pass # 에러나면 기본값 사용
 
-    # 4. 시가총액 데이터 다운로드
+    # 4. 시가총액 데이터 다운로드 & 통화 변환
     caps = {}
     tickers_obj = yf.Tickers(" ".join(unique_tickers))
     
     for t in unique_tickers:
         try:
+            # fast_info 사용 (market_cap) - 없으면 0
             info = tickers_obj.tickers[t].fast_info
             raw_cap = info.get('market_cap', 0)
-            currency = info.get('currency', 'USD')
+            currency = info.get('currency', 'USD') # 통화 확인
             
             if raw_cap is None: raw_cap = 0
             
+            # [통화 변환 로직]
             if currency == 'KRW':
                 cap = raw_cap / usd_krw
             elif currency == 'JPY':
                 cap = raw_cap / usd_jpy
             else:
-                cap = raw_cap 
+                cap = raw_cap # USD 및 기타
                 
             caps[t] = cap
         except:
             caps[t] = 0
 
-    # 5. 계층 구조 빌드 (Bottom-Up)
+    # 5. 계층 구조 빌드 (Bottom-Up 방식)
     leaf_nodes = []
     
-    # 집계용 딕셔너리
-    # cap: 실제 시총 (가중치 계산용)
-    # visual_cap: 시총의 제곱근 (트리맵 크기용)
-    # weighted_sum: 등락률 * 실제 시총 (성적 계산용)
-    sector_aggs = {}   
-    category_aggs = {} 
+    sector_aggs = {}   # { 'Category/Sector': {'cap': 0, 'weighted_sum': 0} }
+    category_aggs = {} # { 'Category': {'cap': 0, 'weighted_sum': 0} }
     
     for category, sectors in portfolio.items():
         if category not in category_aggs:
-            category_aggs[category] = {'cap': 0, 'visual_cap': 0, 'weighted_sum': 0}
+            category_aggs[category] = {'cap': 0, 'weighted_sum': 0}
             
         for sector, tickers in sectors.items():
-            sec_key = f"{category}/{sector}"
+            sec_key = f"{category}/{sector}" # 고유키
             if sec_key not in sector_aggs:
-                sector_aggs[sec_key] = {'cap': 0, 'visual_cap': 0, 'weighted_sum': 0, 'parent': category, 'name': sector}
+                sector_aggs[sec_key] = {'cap': 0, 'weighted_sum': 0, 'parent': category, 'name': sector}
             
             for ticker in tickers:
-                # A. 실제 시총 (USD)
-                real_cap = caps.get(ticker, 0)
-                if real_cap == 0: real_cap = 10000000 
+                # A. 시가총액 (USD로 변환된 값)
+                cap = caps.get(ticker, 0)
+                # 시총 정보 누락시 화면 표시를 위해 최소값(10M USD) 부여 (가중치에는 영향 미미)
+                if cap == 0: cap = 10000000 
                 
-                # B. 시각적 크기 (제곱근)
-                visual_size = math.sqrt(real_cap)
-
-                # C. 등락률 계산
+                # B. 등락률 계산
                 pct_change = 0.0
                 try:
                     if len(unique_tickers) > 1:
@@ -276,40 +275,31 @@ def get_weighted_treemap_data(portfolio, target_date, is_today):
                     pct_change = 0.0
                 
                 # 리프 노드 추가
-                # value: 시각적 크기(제곱근), real_value: 실제 시총
                 leaf_nodes.append({
                     'id': ticker,
                     'parent': sec_key,
-                    'value': visual_size,       # Plotly가 그릴 크기 (제곱근)
-                    'real_value': real_cap,     # 호버에 띄울 실제 값
+                    'value': cap,
                     'change': pct_change,
                     'label': f"{ticker}<br>{pct_change:.2f}%"
                 })
                 
-                # 상위 집계
-                # 성적(등락률)은 '실제 돈(real_cap)' 비중으로 계산해야 정확함
-                sector_aggs[sec_key]['cap'] += real_cap
-                sector_aggs[sec_key]['visual_cap'] += visual_size
-                sector_aggs[sec_key]['weighted_sum'] += (pct_change * real_cap)
+                # 상위 집계 (가중치 누적)
+                sector_aggs[sec_key]['cap'] += cap
+                sector_aggs[sec_key]['weighted_sum'] += (pct_change * cap)
                 
-                category_aggs[category]['cap'] += real_cap
-                category_aggs[category]['visual_cap'] += visual_size
-                category_aggs[category]['weighted_sum'] += (pct_change * real_cap)
+                category_aggs[category]['cap'] += cap
+                category_aggs[category]['weighted_sum'] += (pct_change * cap)
 
     # (2) 섹터 노드 생성
     sector_nodes = []
     for sec_key, data in sector_aggs.items():
         total_cap = data['cap']
-        total_visual = data['visual_cap']
-        
-        # 등락률 평균은 '실제 자본' 가중치로 계산
         avg_change = data['weighted_sum'] / total_cap if total_cap > 0 else 0
         
         sector_nodes.append({
             'id': sec_key,
             'parent': data['parent'],
-            'value': total_visual,      # 섹터 크기는 (자식들 제곱근의 합)
-            'real_value': total_cap,    # 호버에는 실제 섹터 총액
+            'value': total_cap,
             'change': avg_change,
             'label': f"{data['name']}<br>{avg_change:.2f}%"
         })
@@ -317,24 +307,20 @@ def get_weighted_treemap_data(portfolio, target_date, is_today):
     # (3) 카테고리 노드 생성
     category_nodes = []
     root_cap = 0
-    root_visual = 0
     root_weighted_sum = 0
     
     for cat_key, data in category_aggs.items():
         total_cap = data['cap']
-        total_visual = data['visual_cap']
         avg_change = data['weighted_sum'] / total_cap if total_cap > 0 else 0
         
         category_nodes.append({
             'id': cat_key,
             'parent': "운동회장",
-            'value': total_visual,
-            'real_value': total_cap,
+            'value': total_cap,
             'change': avg_change,
             'label': f"{cat_key}<br>{avg_change:.2f}%"
         })
         root_cap += total_cap
-        root_visual += total_visual
         root_weighted_sum += data['weighted_sum']
 
     # (4) 루트 노드
@@ -342,8 +328,7 @@ def get_weighted_treemap_data(portfolio, target_date, is_today):
     root_node = [{
         'id': "운동회장",
         'parent': "",
-        'value': root_visual,
-        'real_value': root_cap,
+        'value': root_cap,
         'change': root_change,
         'label': f"전체 시장<br>{root_change:.2f}%"
     }]
@@ -359,25 +344,23 @@ tab1, tab2 = st.tabs(["📊 전광판(Treemap)", "📈 차트 모아보기(Chart
 
 # --- TAB 1: 트리맵 ---
 with tab1:
-    st.markdown("##### 💡 시가총액의 제곱근 크기로 시각화 (수치는 원본 시총 표시)")
+    st.markdown("##### 💡 시가총액 가중 평균 (USD 환산 기준)으로 영역 크기와 등락률을 표시합니다.")
     if st.button("전광판 새로고침", key="tree_refresh"):
         st.cache_data.clear()
         st.rerun() 
         
-    with st.spinner("선수들의 체급(시총 제곱근)과 성적(등락)을 계산 중입니다..."):
+    with st.spinner("선수들의 체급(시총)과 성적(등락)을 계산 중입니다..."):
         df_tree = get_weighted_treemap_data(MY_PORTFOLIO, selected_date, is_today_selected)
     
     if not df_tree.empty:
-        # customdata에 'real_value'를 넣어서 호버 템플릿에서 사용
         fig = go.Figure(go.Treemap(
             ids=df_tree['id'],
             labels=df_tree['label'],
             parents=df_tree['parent'],
-            values=df_tree['value'],          # 크기 결정: 제곱근 값 (visual_size)
-            customdata=df_tree['real_value'], # 호버 표시용: 실제 값 (real_cap)
+            values=df_tree['value'],      # 타일 크기 = 시가총액 (USD)
             marker=dict(
-                colors=df_tree['change'],
-                colorscale=['#42a5f5', '#eeeeee', '#ef5350'],
+                colors=df_tree['change'], # 색상 = 등락률
+                colorscale=['#42a5f5', '#eeeeee', '#ef5350'], # 파랑(하락)-회색(보합)-빨강(상승)
                 cmid=0,
                 cmin=-3, 
                 cmax=3,
@@ -385,8 +368,7 @@ with tab1:
                 colorbar=dict(title="등락률(%)")
             ),
             textinfo="label",
-            # %{value} 대신 %{customdata}를 사용하여 실제 시총 표시
-            hovertemplate='<b>%{label}</b><br>시가총액(USD): $%{customdata:,.0f}<extra></extra>'
+            hovertemplate='<b>%{label}</b><br>시가총액(USD): $%{value:,.0f}<extra></extra>'
         ))
         
         fig.update_layout(
@@ -399,13 +381,15 @@ with tab1:
     else:
         st.info("데이터를 불러오는 중입니다. 잠시만 기다려주세요.")
 
-# --- TAB 2: 차트 그리드 (기존 동일) ---
+# --- TAB 2: 차트 그리드 ---
 with tab2:
     for category, sectors in MY_PORTFOLIO.items():
         st.header(f"{category}")
         
         for sector, tickers in sectors.items():
             st.subheader(f"{sector}")
+            
+            # 5열 그리드
             cols = st.columns(5)
             
             for idx, ticker in enumerate(tickers):
@@ -416,6 +400,7 @@ with tab2:
 
                         if is_today_selected:
                             hist = stock.history(period="1d", interval="5m")
+                            # 데이터 없으면 최근 5일치로 대체
                             if hist.empty:
                                 recent_hist = stock.history(period="5d", interval="5m")
                                 if not recent_hist.empty:
@@ -433,6 +418,8 @@ with tab2:
                             continue
 
                         curr = hist['Close'].iloc[-1]
+                        
+                        # 전일 종가
                         prev_close = stock.info.get('previousClose', None)
                         if prev_close is None:
                             prev_close = hist['Open'].iloc[0]
@@ -449,17 +436,20 @@ with tab2:
                         diff = curr - ref_price
                         pct = (diff / ref_price) * 100 if ref_price != 0 else 0
                         
+                        # 지표 표시
                         st.metric(
                             label=f"{ticker} {label_suffix}",
                             value=f"${curr:,.2f}",
                             delta=f"{diff:.2f} ({pct:.2f}%)"
                         )
                         
+                        # 미니 차트 (마우스오버 비활성 + 줌 고정)
                         chart = create_chart(ticker, hist)
                         unique_key = f"chart_{category}_{sector}_{ticker}_{idx}"
                         st.plotly_chart(chart, use_container_width=True, config={'staticPlot': True}, key=unique_key)
 
                     except Exception as e:
+                        # 에러 발생 시 해당 종목만 작게 표시하고 계속 진행
                         st.caption(f"⚠️ {ticker} 로딩 실패")
             st.write("") 
         st.divider()
