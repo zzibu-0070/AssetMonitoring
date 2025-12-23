@@ -32,14 +32,14 @@ MY_PORTFOLIO = {
         "양자통신": ["030200.KS", "NOK", "VZ"],
         "장수과학 & 합성생물학": ["NTLA", "RXRX", "TWST", "DNA", "CRSP", "NVO"],
         "우주경제": ["LMT", "NOC", "RKLB"],
-        "우주 쓰레기처리": ["NOC", "RKLB"],
+        "우주 쓰레기처리": ["NOC", "RKLB", "186A.T"],
         "무선 전력전송": ["QCOM", "POWI", "WATT"],
         "BCI플랫폼": ["MDT", "ABT", "BSX"],
         "AI 저작권 플랫폼": ["ORCL", "AMZN", "MSFT", "GOOG", "ADBE"],
         "반도체 벨류체인": ["ON", "TER", "TSM", "005930.KS", "ASML"],
         "데이터센터 냉각": ["066570.KS", "SHEL", "096770.KS", "CC", "VRT"],
         "데이터센터 송전": ["FCX", "006260.KS", "CLF", "PKX", "298040.KS", "010120.KS", "267260.KS", "ETN"],
-        "해저케이블": ["PRYMY", "TEL"],
+        "해저케이블": ["PRYMY", "TEL", "6701.T", "006260.KS"],
         "SMR": ["OKLO", "SMR", "034020.KS", "BWXT", "CCJ"],
         "수소, 암모니아경제": ["BE", "LIN", "APD", "CF", "KBR"],
         "에너지 핀테크": ["ICE", "ENPH", "STEM"],
@@ -58,7 +58,7 @@ MY_PORTFOLIO = {
         "식재료": ["DBA", "CORN", "WEAT"],
         "식량 및 농업": ["ADM", "DE", "CTVA", "CF"],
         "금광 관련주": ["GOLD", "NEM", "AEM", "GDX"],
-        "거대 금융기관": ["BLK", "JPM", "BRK.B", "GS", "SPGI"],
+        "거대 금융기관": ["BLK", "JPM", "BRK-B", "GS", "SPGI"],
         "원유, 가스": ["USO", "UNG"]
     },
     "백팀 - 자금의 안전금고": {
@@ -67,7 +67,7 @@ MY_PORTFOLIO = {
         "데이터인프라": ["MSFT", "AMZN", "AVGO", "ANET", "GOOG", "META", "NVDA"],
         "필수소비재": ["PG", "COST", "WMT", "KO", "PEP", "AMZN"],
         "결제시스템": ["V", "MA", "AXP", "PYPL"],
-        "명품소비재": ["RACE", "EL"],
+        "명품소비재": ["RACE", "EL", "LVMUY", "HESAY", "CFRUY"],
         "물과 식량": ["AWK", "XYL", "ECL", "PHO", "ADM", "DE", "CTVA", "CF"]
     }
 }
@@ -318,7 +318,8 @@ with tab1:
             hovertemplate='<b>%{label}</b><br>등락률: %{customdata[0]:.2f}%'
         )
         fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=700)
-        st.plotly_chart(fig, use_container_width=True)
+        # [수정] use_container_width=True -> width="stretch" 로 변경
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("데이터가 없습니다.")
 
@@ -386,7 +387,8 @@ with tab2:
                         
                         chart = create_chart(ticker, hist)
                         unique_key = f"chart_{category}_{sector}_{ticker}_{idx}"
-                        st.plotly_chart(chart, use_container_width=True, config={'staticPlot': True}, key=unique_key)
+                        # [수정] use_container_width=True -> width="stretch" 로 변경
+                        st.plotly_chart(chart, width="stretch", config={'staticPlot': True}, key=unique_key)
 
                     except Exception as e:
                         st.error(f"Error: {ticker}")
